@@ -5,10 +5,11 @@ Configures Alembic to support async SQLAlchemy operations.
 """
 
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -28,9 +29,22 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def get_database_url() -> str:
+    """Determine the SQLAlchemy DSN used for migrations."""
+    env_url = os.getenv("DATABASE_URL")
+    if env_url:
+        return env_url
+
+    file_url = config.get_main_option("sqlalchemy.url")
+    if file_url and file_url != "driver://user:password@localhost/dbname":
+        return file_url
+
+    raise ValueError("DATABASE_URL is not set in environment and sqlalchemy.url is invalid in alembic.ini")
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = config.get_main_option("sqlalchemy.url")
+    url = get_database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -44,16 +58,10 @@ def run_migrations_offline() -> None:
 
 async def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
-    configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = config.get_main_option("sqlalchemy.url")
-    connectable = await engine_from_config(
-        configuration,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-        future=True,
-    )
+    url = get_database_url()
+    connectable = create_async_engine(url, poolclass=pool.NullPool, future=True)
 
-    async with connectable.begin() as connection:
+    async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()

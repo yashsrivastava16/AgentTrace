@@ -1,7 +1,7 @@
 # Multi-stage build for AgentTrace MCP server
 
 # Build stage
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
@@ -9,10 +9,10 @@ WORKDIR /app
 RUN pip install uv
 
 # Copy dependency files
-COPY pyproject.toml requirements.txt ./
+COPY pyproject.toml uv.lock ./
 
-# Install dependencies
-RUN uv install --frozen
+# Create virtualenv inside project dir and install production deps only
+RUN uv sync --frozen --no-dev
 
 # Runtime stage
 FROM python:3.11-slim
@@ -28,7 +28,8 @@ COPY --from=builder /app/.venv /app/.venv
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="/app/src"
 
 # Copy application code
 COPY src/ /app/src/

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     """Application settings."""
 
     # Database
-    database_url: str = "postgresql+asyncpg://user:password@localhost:5432/agenttrace"
+    database_url: str = "postgresql+asyncpg://agenttrace:agenttrace@postgres:5432/agenttrace"
     database_echo: bool = False
 
     # Server
