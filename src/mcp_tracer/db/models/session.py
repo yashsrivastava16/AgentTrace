@@ -1,35 +1,40 @@
 """
-Session ORM model.
-
-Represents a top-level trace session.
+Session model — the top-level unit of a trace.
 """
-
+import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, JSON
-from sqlalchemy.orm import relationship
-from mcp_tracer.db.models import Base
+
+from sqlalchemy import DateTime, String, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from mcp_tracer.db.engine import Base
 
 
 class Session(Base):
-    """
-    Session model: top-level container for a trace.
-
-    Attributes:
-        id: Unique session identifier (UUID)
-        name: Human-readable session name
-        metadata: Optional JSON metadata
-        created_at: Session creation timestamp
-        updated_at: Last update timestamp
-        spans: Relationship to Span objects
-    """
-
     __tablename__ = "sessions"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    metadata = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="active"
+    )  # active | completed | failed
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, nullable=True
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
-    spans = relationship("Span", back_populates="session")
+    spans: Mapped[list["Span"]] = relationship(
+        "Span", back_populates="session", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Session id={self.session_id} name={self.name} status={self.status}>"

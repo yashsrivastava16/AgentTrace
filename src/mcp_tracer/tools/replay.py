@@ -1,21 +1,34 @@
 """
-Session replay tool handlers.
-
-Tool: replay_session
+Replay tools — MCP tool handlers for session replay.
 """
+from fastmcp import FastMCP
+from mcp_tracer.db.engine import get_db
+from mcp_tracer.services.replay import ReplayService
 
 
-async def replay_session(session_id: str, start_from_span_id: str | None = None) -> dict:
-    """
-    Replay a session's inputs into a new run.
+def register_replay_tools(app: FastMCP) -> None:
 
-    Soft replay: re-inject original inputs, optionally starting from mid-trace.
+    @app.tool
+    async def replay_session(
+        session_id: str,
+        from_span_id: str | None = None,
+    ) -> dict:
+        """
+        Replay a session's inputs into a new run.
+        Creates a new session and returns all original inputs
+        so agents can re-execute them fresh.
 
-    Args:
-        session_id: Session ID to replay
-        start_from_span_id: Optional span ID to start from (for mid-trace replay)
+        Args:
+            session_id: UUID of the session to replay
+            from_span_id: Optional UUID to start replay from mid-trace.
+                          Useful when you only want to re-run from the failure point.
 
-    Returns:
-        New session ID and replay metadata
-    """
-    pass
+        Returns:
+            new_session_id, replayed_from_session_id, spans_to_replay
+        """
+        async with get_db() as db:
+            service = ReplayService(db)
+            return await service.replay_session(
+                session_id=session_id,
+                from_span_id=from_span_id,
+            )

@@ -1,39 +1,38 @@
 """
-Event ORM model.
-
-Represents a notable event within a span.
+Event model — a notable occurrence inside a span.
 """
-
+import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Text
-from sqlalchemy.orm import relationship
-from mcp_tracer.db.models import Base
+
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from mcp_tracer.db.engine import Base
 
 
 class Event(Base):
-    """
-    Event model: a notable event logged within a span.
-
-    Event types: error, warning, info, debug
-
-    Attributes:
-        id: Unique event identifier (UUID)
-        span_id: Parent span ID
-        type: Event type
-        message: Event message
-        metadata: Optional JSON metadata
-        created_at: Event creation timestamp
-        span: Relationship to Span object
-    """
-
     __tablename__ = "events"
 
-    id = Column(String, primary_key=True)
-    span_id = Column(String, ForeignKey("spans.id"), nullable=False)
-    type = Column(String, nullable=False)  # error, warning, info, debug
-    message = Column(Text, nullable=False)
-    metadata = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    span_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("spans.span_id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # log | error | warning
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     # Relationships
-    span = relationship("Span", back_populates="events")
+    span: Mapped["Span"] = relationship("Span", back_populates="events")
+
+    def __repr__(self) -> str:
+        return f"<Event id={self.event_id} type={self.event_type}>"

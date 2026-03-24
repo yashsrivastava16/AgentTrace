@@ -1,23 +1,37 @@
 """
-Event logging tool handlers.
-
-Tool: log_event
+Event tools — MCP tool handlers for event logging.
 """
+from fastmcp import FastMCP
+from mcp_tracer.db.engine import get_db
+from mcp_tracer.services.event import EventService
 
 
-async def log_event(
-    span_id: str, event_type: str, message: str, metadata: dict | None = None
-) -> dict:
-    """
-    Log a notable event within a span.
+def register_event_tools(app: FastMCP) -> None:
 
-    Args:
-        span_id: Span ID
-        event_type: Type of event (error, warning, info, debug)
-        message: Event message
-        metadata: Optional metadata dictionary
+    @app.tool
+    async def log_event(
+        span_id: str,
+        event_type: str,
+        message: str,
+        metadata: dict | None = None,
+    ) -> dict:
+        """
+        Log a notable event inside a span.
 
-    Returns:
-        Event ID and creation timestamp
-    """
-    pass
+        Args:
+            span_id: UUID of the span this event belongs to
+            event_type: One of 'log', 'error', 'warning'
+            message: Human readable description of what happened
+            metadata: Optional additional context
+
+        Returns:
+            event_id, span_id, event_type, message, created_at
+        """
+        async with get_db() as db:
+            service = EventService(db)
+            return await service.log_event(
+                span_id=span_id,
+                event_type=event_type,
+                message=message,
+                metadata=metadata,
+            )
