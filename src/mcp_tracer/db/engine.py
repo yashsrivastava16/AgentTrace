@@ -1,33 +1,42 @@
-"""
-SQLAlchemy engine and session factory configuration.
+from typing import AsyncGenerator
 
-Uses async SQLAlchemy with asyncpg driver for PostgreSQL.
-"""
-
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase
 
 from mcp_tracer.core.config import settings
 
 
-# Create async engine
 engine = create_async_engine(
-    settings.database_url,
-    echo=settings.debug,
+    settings.DATABASE_URL,
+    echo=settings.DEBUG,
+    pool_size=10,
+    max_overflow=20,
     pool_pre_ping=True,
-    pool_size=20,
-    max_overflow=0,
 )
 
-# Create async session factory
-async_session_factory = sessionmaker(
-    engine,
+AsyncSessionFactory = async_sessionmaker(
+    bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,
 )
 
 
-async def get_session() -> AsyncSession:
-    """Get a new async database session."""
-    async with async_session_factory() as session:
-        yield session
+class Base(DeclarativeBase):
+    pass
+
+
+# ← return type is AsyncGenerator, not AsyncSession
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionFactory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()

@@ -1,9 +1,6 @@
-"""
-SQLAlchemy ORM models.
+from mcp_tracer.db.engine import Base
+from mcp_tracer.db.models.session import Session
+from mcp_tracer.db.models.span import Span
+from mcp_tracer.db.models.event import Event
 
-Core domain models: Session, Span, Event.
-"""
-
-from sqlalchemy.orm import declarative_base
-
-Base = declarative_base()
+__all__ = ["Base", "Session", "Span", "Event"]
