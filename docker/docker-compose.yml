@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agenttrace-db
+    environment:
+      POSTGRES_USER: agenttrace
+      POSTGRES_PASSWORD: agenttrace_password
+      POSTGRES_DB: agenttrace
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenttrace"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: agenttrace-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://agenttrace:agenttrace_password@postgres:5432/agenttrace
+      DEBUG: "false"
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../src:/app/src
+      - ../migrations:/app/migrations
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        python -m mcp_tracer.server
+      "
+
+volumes:
+  postgres_data:
