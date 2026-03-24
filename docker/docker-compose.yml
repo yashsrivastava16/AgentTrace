@@ -17,6 +17,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   app:
     build:
@@ -27,9 +28,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://agenttrace:agenttrace@postgres:5432/agenttrace
+      APP_ENV: development
       DEBUG: "false"
       LOG_LEVEL: INFO
+      HOST: 0.0.0.0
+      PORT: 8000
+      DATABASE_URL: postgresql+asyncpg://agenttrace:agenttrace@postgres:5432/agenttrace
     ports:
       - "8000:8000"
     volumes:
@@ -40,6 +44,7 @@ services:
         alembic upgrade head &&
         python -m mcp_tracer.server
       "
+    restart: unless-stopped
 
 volumes:
   postgres_data:

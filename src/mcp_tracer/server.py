@@ -4,51 +4,30 @@ Initializes the MCP server, registers all tools, and starts the server.
 """
 from fastmcp import FastMCP
 
-# Initialize the FastMCP app
-app = FastMCP("agenttrace")
+from mcp_tracer.core.config import settings
+from mcp_tracer.db.engine import get_db
+from mcp_tracer.tools import (
+    register_session_tools,
+    register_span_tools,
+    register_event_tools,
+    register_query_tools,
+    register_replay_tools,
+)
 
+# Initialize FastMCP app
+app = FastMCP(settings.APP_NAME)
 
-@app.tool
-async def create_session(name: str, metadata: dict | None = None):
-    """Create a new trace session."""
-    pass
-
-
-@app.tool
-async def start_span(session_id: str, span_type: str, parent_span_id: str | None = None, metadata: dict | None = None):
-    """Start a new span within a session."""
-    pass
-
-
-@app.tool
-async def end_span(span_id: str, output: dict | None = None, status: str = "success"):
-    """End a span and record its output."""
-    pass
-
-
-@app.tool
-async def log_event(span_id: str, event_type: str, message: str, metadata: dict | None = None):
-    """Log an event within a span."""
-    pass
-
-
-@app.tool
-async def query_session(session_id: str):
-    """Retrieve the full trace tree for a session."""
-    pass
-
-
-@app.tool
-async def query_cross_session(filters: dict | None = None):
-    """Query spans and events across all sessions with filters."""
-    pass
-
-
-@app.tool
-async def replay_session(session_id: str, start_from_span_id: str | None = None):
-    """Replay a session's inputs into a new run."""
-    pass
+# Register all tools
+register_session_tools(app, get_db)
+register_span_tools(app, get_db)
+register_event_tools(app, get_db)
+register_query_tools(app, get_db)
+register_replay_tools(app, get_db)
 
 
 if __name__ == "__main__":
-    app.run(transport="http", host="0.0.0.0" , port=8000)
+    app.run(
+        transport="http",
+        host=settings.HOST,
+        port=settings.PORT,
+    )
