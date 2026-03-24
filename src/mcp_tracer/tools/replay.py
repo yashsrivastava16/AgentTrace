@@ -2,11 +2,11 @@
 Replay tools — MCP tool handlers for session replay.
 """
 from fastmcp import FastMCP
-
+from mcp_tracer.db.engine import get_db
 from mcp_tracer.services.replay import ReplayService
 
 
-def register_replay_tools(app: FastMCP, get_db) -> None:
+def register_replay_tools(app: FastMCP) -> None:
 
     @app.tool
     async def replay_session(
@@ -26,7 +26,7 @@ def register_replay_tools(app: FastMCP, get_db) -> None:
         Returns:
             new_session_id, replayed_from_session_id, spans_to_replay
         """
-        async for db in get_db():
+        async with get_db() as db:
             service = ReplayService(db)
             return await service.replay_session(
                 session_id=session_id,

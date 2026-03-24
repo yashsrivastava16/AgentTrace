@@ -33,7 +33,7 @@ services:
       LOG_LEVEL: INFO
       HOST: 0.0.0.0
       PORT: 8000
-      DATABASE_URL: postgresql+asyncpg://agenttrace:agenttrace@postgres:5432/agenttrace
+      DATABASE_URL: postgresql+asyncpg://agenttrace:agenttrace@agenttrace-db:5432/agenttrace
     ports:
       - "8000:8000"
     volumes:

@@ -2,11 +2,11 @@
 Span tools — MCP tool handlers for span lifecycle.
 """
 from fastmcp import FastMCP
-
+from mcp_tracer.db.engine import get_db
 from mcp_tracer.services.span import SpanService
 
 
-def register_span_tools(app: FastMCP, get_db) -> None:
+def register_span_tools(app: FastMCP) -> None:
 
     @app.tool
     async def start_span(
@@ -31,7 +31,7 @@ def register_span_tools(app: FastMCP, get_db) -> None:
         Returns:
             span_id, session_id, span_type, actor, target, status, started_at
         """
-        async for db in get_db():
+        async with get_db() as db:
             service = SpanService(db)
             return await service.start_span(
                 session_id=session_id,
@@ -59,7 +59,7 @@ def register_span_tools(app: FastMCP, get_db) -> None:
         Returns:
             span_id, status, ended_at, output
         """
-        async for db in get_db():
+        async with get_db() as db:
             service = SpanService(db)
             return await service.end_span(
                 span_id=span_id,

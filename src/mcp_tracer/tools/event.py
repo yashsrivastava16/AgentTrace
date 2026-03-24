@@ -2,11 +2,11 @@
 Event tools — MCP tool handlers for event logging.
 """
 from fastmcp import FastMCP
-
+from mcp_tracer.db.engine import get_db
 from mcp_tracer.services.event import EventService
 
 
-def register_event_tools(app: FastMCP, get_db) -> None:
+def register_event_tools(app: FastMCP) -> None:
 
     @app.tool
     async def log_event(
@@ -27,7 +27,7 @@ def register_event_tools(app: FastMCP, get_db) -> None:
         Returns:
             event_id, span_id, event_type, message, created_at
         """
-        async for db in get_db():
+        async with get_db() as db:
             service = EventService(db)
             return await service.log_event(
                 span_id=span_id,

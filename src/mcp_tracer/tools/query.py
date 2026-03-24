@@ -2,11 +2,11 @@
 Query tools — MCP tool handlers for session and cross-session querying.
 """
 from fastmcp import FastMCP
-
+from mcp_tracer.db.engine import get_db
 from mcp_tracer.services.query import QueryService
 
 
-def register_query_tools(app: FastMCP, get_db) -> None:
+def register_query_tools(app: FastMCP) -> None:
 
     @app.tool
     async def query_session(session_id: str) -> dict:
@@ -20,7 +20,7 @@ def register_query_tools(app: FastMCP, get_db) -> None:
         Returns:
             Full nested trace tree with all spans and events
         """
-        async for db in get_db():
+        async with get_db() as db:
             service = QueryService(db)
             return await service.get_session_trace(session_id=session_id)
 
@@ -47,7 +47,7 @@ def register_query_tools(app: FastMCP, get_db) -> None:
         Returns:
             List of matching spans with session context and events
         """
-        async for db in get_db():
+        async with get_db() as db:
             service = QueryService(db)
             return await service.cross_session_query(
                 actor=actor,

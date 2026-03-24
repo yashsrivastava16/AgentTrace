@@ -2,12 +2,11 @@
 Session tools — MCP tool handlers for session lifecycle.
 """
 from fastmcp import FastMCP
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from mcp_tracer.db.engine import get_db
 from mcp_tracer.services.session import SessionService
 
 
-def register_session_tools(app: FastMCP, get_db) -> None:
+def register_session_tools(app: FastMCP) -> None:
 
     @app.tool
     async def create_session(name: str, metadata: dict | None = None) -> dict:
@@ -21,7 +20,7 @@ def register_session_tools(app: FastMCP, get_db) -> None:
         Returns:
             session_id, name, status, started_at
         """
-        async for db in get_db():
+        async with get_db() as db:
             service = SessionService(db)
             return await service.create_session(name=name, metadata=metadata)
 
@@ -36,7 +35,7 @@ def register_session_tools(app: FastMCP, get_db) -> None:
         Returns:
             session_id, status, ended_at
         """
-        async for db in get_db():
+        async with get_db() as db:
             service = SessionService(db)
             return await service.complete_session(session_id=session_id)
 
@@ -51,6 +50,6 @@ def register_session_tools(app: FastMCP, get_db) -> None:
         Returns:
             session_id, status, ended_at
         """
-        async for db in get_db():
+        async with get_db() as db:
             service = SessionService(db)
             return await service.fail_session(session_id=session_id)
