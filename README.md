@@ -22,6 +22,12 @@ Session abc-123
 
 ---
 
+🔒 **Need Advanced Authorization?**
+
+> As an MCP server, AgentTrace acts as the central hub for your multi-agent architecture. If your setup requires strict access controls, granular agent permissions, or specialized authorization flows, check out the `feature/Auth-Enable` branch for our fully authenticated implementation!
+
+---
+
 ## Features
 
 - 📌 **Session-scoped tracing** — every run is one session, all events hang off it
@@ -687,10 +693,55 @@ mcp-tracer/
 
 ## Contributing
 
-Contributions are welcome. Please open an issue first to discuss what you'd like to change.
+First off, thank you for considering contributing to #AgnetTrace! It's people like you that make the open-source community such an amazing place to learn, inspire, and create.
+
+We welcome contributions of all kinds, whether it is fixing bugs, improving documentation, suggesting new features, or writing code.
 
 ---
 
-## License
+## ⚖️ License and Contributions
 
-MIT
+This project is open-source and released under the **MIT License**. By contributing to this repository, you agree that your contributions will be licensed under its MIT License.
+
+---
+
+## 🚀 How Can I Contribute?
+
+### Reporting Bugs
+
+If you find a bug, please create an issue to report it. To help us resolve it quickly, include:
+
+- A clear and descriptive title.
+- Steps to reproduce the exact behavior.
+- Expected behavior versus what actually happened.
+- Your operating system, browser, and relevant version numbers.
+
+### Suggesting Enhancements
+
+Feature requests are always welcome! When proposing a new feature, please open an issue and include:
+
+- The problem this feature solves.
+- A detailed description of the proposed solution.
+- Any alternative solutions you have considered.
+- Mockups or code snippets if applicable.
+
+---
+
+## 🛠️ Pull Request Process
+
+When you are ready to submit your code, follow this process:
+
+1. Create a new branch for your feature or bugfix: `git checkout -b feature/your-feature-name`
+2. Make your changes and test them thoroughly.
+3. Commit your changes with clear, descriptive commit messages.
+4. Push your branch to your forked repository: `git push origin feature/your-feature-name`
+5. Open a Pull Request (PR) against the `feature/External-PR` branch of the original repository.
+6. Provide a detailed description in your PR explaining what changes you made and why.
+
+A maintainer will review your PR, provide feedback, and merge it once it is approved.
+
+---
+
+## 🤝 Code of Conduct
+
+Please note that this project is released with a Contributor Code of Conduct. By participating in this project, you agree to abide by its terms. We expect all contributors to maintain a respectful and welcoming environment for everyone.
