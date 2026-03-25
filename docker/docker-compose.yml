@@ -34,6 +34,9 @@ services:
       HOST: 0.0.0.0
       PORT: 8000
       DATABASE_URL: postgresql+asyncpg://agenttrace:agenttrace@agenttrace-db:5432/agenttrace
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRY_MINUTES: 43200
     ports:
       - "8000:8000"
     volumes:

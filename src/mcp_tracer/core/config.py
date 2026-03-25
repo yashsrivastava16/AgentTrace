@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     HOST: str = Field(default="0.0.0.0", env="HOST")
     PORT: int = Field(default=8000, env="PORT")
 
+    #JWT
+    JWT_SECRET_KEY: str = Field(..., env="JWT_SECRET_KEY")
+    JWT_ALGORITHM: str = Field(default="HS256", env="JWT_ALGORITHM")
+    JWT_EXPIRY_MINUTES: int = Field(default=43200, env="JWT_EXPIRY_MINUTES")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

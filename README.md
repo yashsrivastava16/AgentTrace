@@ -28,6 +28,7 @@ Session abc-123
 - 🌲 **Full trace tree reconstruction** — visualize the exact call graph via `parent_span_id`
 - 🔎 **Cross-session querying** — query by agent, error type, span type, or time range across all sessions
 - 🔁 **Soft session replay** — re-inject original inputs into a fresh run for root cause analysis, optionally starting from mid-trace
+- 🔐 **JWT authentication** — agent-level and session-scoped tokens for secure multi-agent access
 - 🧩 **Protocol-native** — built as an MCP server, any MCP-compatible agent gets tracing for free just by connecting
 - 🏗️ **Production-grade** — async SQLAlchemy, PostgreSQL, strict three-layer architecture
 
@@ -42,6 +43,7 @@ Session abc-123
 | ORM             | SQLAlchemy (async)           |
 | Migrations      | Alembic                      |
 | Validation      | Pydantic + pydantic-settings |
+| Auth            | python-jose + JWT            |
 | Package Manager | UV                           |
 
 ---
@@ -72,6 +74,11 @@ DEBUG=false
 HOST=0.0.0.0
 PORT=8000
 DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/agenttrace
+
+# Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+JWT_SECRET_KEY=your-secret-key-here
+JWT_ALGORITHM=HS256
+JWT_EXPIRY_MINUTES=43200
 ```
 
 Run migrations and start the server:
@@ -92,32 +99,152 @@ Server runs at `http://localhost:8000/mcp`
 ```bash
 git clone https://github.com/your-username/agenttrace.git
 cd agenttrace
+```
 
+Add your JWT secret to `.env`:
+
+```env
+JWT_SECRET_KEY=your-secret-key-here
+```
+
+Generate a secret if you don't have one:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Start everything:
+
+```bash
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-That's it. Docker will spin up PostgreSQL, wait for it to be healthy, run migrations automatically, and start the MCP server on port `8000`.
+Docker will spin up PostgreSQL, wait for it to be healthy, run migrations automatically, and start the MCP server on port `8000`.
 
 Server runs at `http://localhost:8000/mcp`
 
 ---
 
+## Authentication
+
+AgentTrace uses JWT Bearer token authentication. Every tool call must include a valid token in the `Authorization` header.
+
+### Two Token Types
+
+| Token Type        | Purpose                                                               | Scope                      |
+| ----------------- | --------------------------------------------------------------------- | -------------------------- |
+| **Agent Token**   | General access — used to call `create_session` and get a `session_id` | Not session-scoped         |
+| **Session Token** | Locked to a specific session — used for all calls within that session | Scoped to one `session_id` |
+
+---
+
+### Generate an Agent Token
+
+**Via Docker:**
+
+```bash
+docker compose exec app python -c "
+import sys
+sys.path.insert(0, 'src')
+from mcp_tracer.core.security import create_agent_token
+print(create_agent_token('my-agent'))
+"
+```
+
+**Via script (`scripts/generate_token.py`):**
+
+```python
+import sys, os
+sys.path.insert(0, "src")
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://placeholder")
+
+from mcp_tracer.core.security import create_agent_token, create_session_token
+
+# Agent token — general purpose
+print(create_agent_token("my-agent"))
+
+# Session token — scoped to a specific session (use after create_session)
+# print(create_session_token("my-agent", "your-session-uuid-here"))
+```
+
+```bash
+uv run python scripts/generate_token.py
+```
+
+Output will look like:
+
+```
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJteS1hZ2VudCIsInRva2VuX3R5cGUiOiJhZ2VudCJ9...
+```
+
+---
+
+### Token Flow in Production
+
+```
+1. Agent starts
+   → uses agent_token to call create_session
+   → receives session_id
+
+2. Agent generates session_token scoped to that session_id
+   → create_session_token("my-agent", session_id)
+
+3. Agent uses session_token for all remaining calls
+   → start_span, end_span, log_event, query_session, replay_session
+
+4. New run → repeat from step 1
+```
+
+In code:
+
+```python
+from fastmcp import Client
+from mcp_tracer.core.security import create_agent_token, create_session_token
+
+agent_token = create_agent_token("my-agent")
+
+# Step 1 — create session with agent token
+async with Client("http://localhost:8000/mcp",
+                  headers={"Authorization": f"Bearer {agent_token}"}) as client:
+    session = await client.call_tool("create_session", {"name": "my-run"})
+    session_id = session["session_id"]
+
+# Step 2 — generate session token
+session_token = create_session_token("my-agent", session_id)
+
+# Step 3 — use session token for all remaining calls
+async with Client("http://localhost:8000/mcp",
+                  headers={"Authorization": f"Bearer {session_token}"}) as client:
+    await client.call_tool("start_span", {
+        "session_id": session_id,
+        "span_type": "agent_call",
+        "actor": "orchestrator",
+        "target": "research_agent",
+        "input": {"task": "summarize report"}
+    })
+```
+
+---
+
 ### Connect to VS Code
 
-Once the server is running, add this to your VS Code MCP settings (`Ctrl+Shift+P` → `Claude: Open MCP Settings`):
+Generate an agent token (see above), then add it to your MCP settings (`Ctrl+Shift+P` → `Claude: Open MCP Settings`):
 
 ```json
 {
   "mcpServers": {
     "agenttrace": {
       "type": "http",
-      "url": "http://localhost:8000/mcp"
+      "url": "http://localhost:8000/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_AGENT_TOKEN_HERE"
+      }
     }
   }
 }
 ```
 
-Refresh MCP servers and AgentTrace will appear with all 7 tools available.
+> **Note:** VS Code uses a static config so agent token is used for all tools in dev. Session-scoped tokens apply to production agents that manage their own auth lifecycle programmatically.
 
 ---
 
@@ -126,7 +253,10 @@ Refresh MCP servers and AgentTrace will appear with all 7 tools available.
 ```python
 from fastmcp import Client
 
-async with Client("http://localhost:8000/mcp") as client:
+async with Client(
+    "http://localhost:8000/mcp",
+    headers={"Authorization": f"Bearer {agent_token}"}
+) as client:
     tools = await client.list_tools()
     print(tools)  # lists all 7 AgentTrace tools
 ```
@@ -158,7 +288,7 @@ AgentTrace uses three core concepts:
 
 ### `create_session`
 
-Creates a new trace session. Call this at the start of every agent run.
+Creates a new trace session. Call this at the start of every agent run. Requires **agent token**.
 
 **Parameters:**
 
@@ -221,7 +351,7 @@ span2 = await client.call_tool("start_span", {
     "actor": "orchestrator",
     "target": "invoice_agent",
     "input": {"batch_id": "batch-99"},
-    "parent_span_id": span1["span_id"]   # nested under span1
+    "parent_span_id": span1["span_id"]
 })
 ```
 
@@ -279,7 +409,6 @@ Logs a notable event inside a span. Use this for errors, warnings, or anything w
 **Example:**
 
 ```python
-# Log an error
 await client.call_tool("log_event", {
     "span_id": span2["span_id"],
     "event_type": "error",
@@ -289,14 +418,6 @@ await client.call_tool("log_event", {
         "key": "batch-99/invoice.pdf",
         "http_status": 404
     }
-})
-
-# Log a warning
-await client.call_tool("log_event", {
-    "span_id": span2["span_id"],
-    "event_type": "warning",
-    "message": "Retrying after rate limit",
-    "metadata": {"retry_attempt": 2, "wait_seconds": 5}
 })
 ```
 
@@ -315,10 +436,7 @@ Marks a session as completed or failed. Call one of these when the entire run fi
 **Example:**
 
 ```python
-# On success
 await client.call_tool("complete_session", {"session_id": session_id})
-
-# On failure
 await client.call_tool("fail_session", {"session_id": session_id})
 ```
 
@@ -326,7 +444,7 @@ await client.call_tool("fail_session", {"session_id": session_id})
 
 ### `query_session`
 
-Retrieves the full nested trace tree for a session. This is your primary debugging tool — one call gives you everything that happened in a run.
+Retrieves the full nested trace tree for a session. One call gives you everything that happened in a run.
 
 **Parameters:**
 
@@ -339,34 +457,22 @@ Retrieves the full nested trace tree for a session. This is your primary debuggi
 **Example:**
 
 ```python
-trace = await client.call_tool("query_session", {
-    "session_id": session_id
-})
+trace = await client.call_tool("query_session", {"session_id": session_id})
 
-# Response structure:
 # {
 #   "session_id": "abc-123",
 #   "name": "invoice-processing-run-42",
 #   "status": "failed",
 #   "spans": [
 #     {
-#       "span_id": "...",
 #       "span_type": "human_input",
-#       "actor": "human",
-#       "target": "orchestrator",
 #       "status": "failed",
 #       "events": [],
 #       "children": [
 #         {
-#           "span_id": "...",
 #           "span_type": "agent_call",
 #           "status": "failed",
-#           "events": [
-#             {
-#               "event_type": "error",
-#               "message": "Invoice file not found on S3"
-#             }
-#           ],
+#           "events": [{"event_type": "error", "message": "File not found"}],
 #           "children": []
 #         }
 #       ]
@@ -379,40 +485,32 @@ trace = await client.call_tool("query_session", {
 
 ### `query_cross_session`
 
-Queries spans across all sessions with filters. Use this to find recurring failures, slow agents, or patterns across multiple runs.
+Queries spans across all sessions with filters. Use this to find recurring failures or patterns. Requires **agent token**.
 
 **Parameters:**
 
-| Parameter        | Type   | Required | Description                                                         |
-| ---------------- | ------ | -------- | ------------------------------------------------------------------- |
-| `actor`          | string | ❌       | Filter by actor name e.g. `"invoice_agent"`                         |
-| `span_type`      | string | ❌       | Filter by type — `human_input`, `agent_call`, `tool_call`, `hitl`   |
-| `status`         | string | ❌       | Filter by status — `running`, `success`, `failed`                   |
-| `event_type`     | string | ❌       | Filter spans containing this event type — `log`, `error`, `warning` |
-| `started_after`  | string | ❌       | ISO datetime e.g. `"2026-01-01T00:00:00"`                           |
-| `started_before` | string | ❌       | ISO datetime e.g. `"2026-12-31T23:59:59"`                           |
-
-**Returns:** List of matching spans with session context and events
+| Parameter        | Type   | Required | Description                                             |
+| ---------------- | ------ | -------- | ------------------------------------------------------- |
+| `actor`          | string | ❌       | Filter by actor name e.g. `"invoice_agent"`             |
+| `span_type`      | string | ❌       | One of `human_input`, `agent_call`, `tool_call`, `hitl` |
+| `status`         | string | ❌       | One of `running`, `success`, `failed`                   |
+| `event_type`     | string | ❌       | Filter spans containing this event type                 |
+| `started_after`  | string | ❌       | ISO datetime e.g. `"2026-01-01T00:00:00"`               |
+| `started_before` | string | ❌       | ISO datetime e.g. `"2026-12-31T23:59:59"`               |
 
 **Example:**
 
 ```python
-# Find all failed spans from invoice_agent this week
+# All failed spans from invoice_agent this week
 results = await client.call_tool("query_cross_session", {
     "actor": "invoice_agent",
     "status": "failed",
     "started_after": "2026-03-17T00:00:00"
 })
 
-# Find all spans that had an error event
+# All spans with error events
 results = await client.call_tool("query_cross_session", {
     "event_type": "error"
-})
-
-# Find all tool_call spans that failed
-results = await client.call_tool("query_cross_session", {
-    "span_type": "tool_call",
-    "status": "failed"
 })
 ```
 
@@ -420,32 +518,24 @@ results = await client.call_tool("query_cross_session", {
 
 ### `replay_session`
 
-Creates a new session and returns all original inputs from a past session so agents can re-execute them fresh. Useful for reproducing bugs without manually re-running the entire system.
+Creates a new session and returns original inputs so agents can re-execute them fresh.
 
 **Parameters:**
 
-| Parameter      | Type   | Required | Description                                                                      |
-| -------------- | ------ | -------- | -------------------------------------------------------------------------------- |
-| `session_id`   | string | ✅       | UUID of the session to replay                                                    |
-| `from_span_id` | string | ❌       | Start replay from a specific span — useful to re-run only from the failure point |
-
-**Returns:** `new_session_id`, `replayed_from_session_id`, `spans_to_replay`
+| Parameter      | Type   | Required | Description                       |
+| -------------- | ------ | -------- | --------------------------------- |
+| `session_id`   | string | ✅       | UUID of the session to replay     |
+| `from_span_id` | string | ❌       | Start replay from a specific span |
 
 **Example:**
 
 ```python
-# Full replay from the beginning
-replay = await client.call_tool("replay_session", {
-    "session_id": session_id
-})
-
-# Partial replay — start from the failure point
+# Replay from the failure point
 replay = await client.call_tool("replay_session", {
     "session_id": session_id,
     "from_span_id": failed_span_id
 })
 
-# Feed inputs back to your agents using the new session
 new_session_id = replay["new_session_id"]
 for span in replay["spans_to_replay"]:
     await your_agent.run(span["input"], session_id=new_session_id)
@@ -455,28 +545,34 @@ for span in replay["spans_to_replay"]:
 
 ## Full Integration Example
 
-Complete example showing how to wrap an existing multi-agent system with AgentTrace:
-
 ```python
 import asyncio
 from fastmcp import Client
+from mcp_tracer.core.security import create_agent_token, create_session_token
 
 AGENTTRACE_URL = "http://localhost:8000/mcp"
 
 
 async def run_pipeline(user_message: str):
-    async with Client(AGENTTRACE_URL) as tracer:
+    agent_token = create_agent_token("orchestrator")
 
-        # 1. Start session
-        session = await tracer.call_tool("create_session", {
+    # Step 1 — create session with agent token
+    async with Client(AGENTTRACE_URL,
+                      headers={"Authorization": f"Bearer {agent_token}"}) as client:
+        session = await client.call_tool("create_session", {
             "name": "pipeline-run",
             "metadata": {"triggered_by": "api"}
         })
         session_id = session["session_id"]
 
+    # Step 2 — generate session token
+    session_token = create_session_token("orchestrator", session_id)
+
+    # Step 3 — use session token for all remaining calls
+    async with Client(AGENTTRACE_URL,
+                      headers={"Authorization": f"Bearer {session_token}"}) as client:
         try:
-            # 2. Trace human input
-            root_span = await tracer.call_tool("start_span", {
+            root_span = await client.call_tool("start_span", {
                 "session_id": session_id,
                 "span_type": "human_input",
                 "actor": "human",
@@ -484,8 +580,7 @@ async def run_pipeline(user_message: str):
                 "input": {"message": user_message}
             })
 
-            # 3. Trace orchestrator → agent call
-            agent_span = await tracer.call_tool("start_span", {
+            agent_span = await client.call_tool("start_span", {
                 "session_id": session_id,
                 "span_type": "agent_call",
                 "actor": "orchestrator",
@@ -495,39 +590,34 @@ async def run_pipeline(user_message: str):
             })
 
             try:
-                # Your actual agent logic here
                 result = await research_agent.run(user_message)
-
-                await tracer.call_tool("end_span", {
+                await client.call_tool("end_span", {
                     "span_id": agent_span["span_id"],
                     "status": "success",
                     "output": {"result": result}
                 })
 
             except Exception as e:
-                await tracer.call_tool("log_event", {
+                await client.call_tool("log_event", {
                     "span_id": agent_span["span_id"],
                     "event_type": "error",
                     "message": str(e),
                     "metadata": {"exception_type": type(e).__name__}
                 })
-                await tracer.call_tool("end_span", {
+                await client.call_tool("end_span", {
                     "span_id": agent_span["span_id"],
                     "status": "failed"
                 })
                 raise
 
-            # 4. Close root span and complete session
-            await tracer.call_tool("end_span", {
+            await client.call_tool("end_span", {
                 "span_id": root_span["span_id"],
                 "status": "success"
             })
-            await tracer.call_tool("complete_session", {
-                "session_id": session_id
-            })
+            await client.call_tool("complete_session", {"session_id": session_id})
 
         except Exception:
-            await tracer.call_tool("fail_session", {"session_id": session_id})
+            await client.call_tool("fail_session", {"session_id": session_id})
             raise
 
 
@@ -538,108 +628,52 @@ asyncio.run(run_pipeline("Summarize the quarterly report"))
 
 ## Query Examples
 
-### Debugging a Specific Run
-
-**Scenario:** A user-reported issue with invoice processing. You remember the session ID from the error logs.
+### Debug a Specific Run
 
 ```python
-# Get the full trace tree to understand what went wrong
-trace = await tracer.call_tool("query_session", {
+trace = await client.call_tool("query_session", {
     "session_id": "69f4f019-b5ca-46a2-bf5e-59fb176c3227"
 })
-
-# Output shows the entire call chain with errors
-# Navigate to the failed span and see exactly where it broke
 ```
 
 ### Find All Errors This Week
 
-**Scenario:** You want to see all errors across your system in the last 7 days.
-
 ```python
-results = await tracer.call_tool("query_cross_session", {
+results = await client.call_tool("query_cross_session", {
     "event_type": "error",
-    "started_after": "2026-03-17T00:00:00",
-    "started_before": "2026-03-24T23:59:59"
+    "started_after": "2026-03-17T00:00:00"
 })
-
-# Returns all spans containing error events — useful for weekly reviews
 ```
 
-### Spot Failing Agents
-
-**Scenario:** The `invoice_agent` has been failing. Find all its failures.
+### Spot a Failing Agent
 
 ```python
-results = await tracer.call_tool("query_cross_session", {
+results = await client.call_tool("query_cross_session", {
     "actor": "invoice_agent",
     "status": "failed"
 })
-
-# See every failed run from this agent — identify patterns
 ```
 
-### Find Slow Tool Calls
-
-**Scenario:** Tool calls are taking too long. Find all tool calls that might be problematic.
+### Find Pending HITL Reviews
 
 ```python
-results = await tracer.call_tool("query_cross_session", {
-    "span_type": "tool_call",
-    "status": "success"
+results = await client.call_tool("query_cross_session", {
+    "span_type": "hitl",
+    "status": "running"
 })
-
-# Returns all successful tool calls — you can inspect duration and optimize
 ```
 
 ### Reproduce a Bug
 
-**Scenario:** A user reports a bug. Replay the session to debug locally.
-
 ```python
-# Find the failed session
-failed_session = await tracer.call_tool("query_cross_session", {
-    "actor": "research_agent",
+failed = await client.call_tool("query_cross_session", {
     "status": "failed",
     "started_after": "2026-03-24T12:00:00"
 })
 
-session_id = failed_session[0]["session_id"]
-
-# Replay it in a fresh session with new logic
-replay = await tracer.call_tool("replay_session", {
-    "session_id": session_id
+replay = await client.call_tool("replay_session", {
+    "session_id": failed[0]["session_id"]
 })
-
-new_session = replay["new_session_id"]
-# Re-run your pipeline with the new session ID — same inputs, fresh code
-```
-
-### Find All Pending HITL Reviews
-
-**Scenario:** You want to see all human-in-the-loop approvals that are still pending.
-
-```python
-results = await tracer.call_tool("query_cross_session", {
-    "span_type": "hitl",
-    "status": "running"
-})
-
-# See all pending approvals across all sessions
-```
-
-### Cross-Session Pattern Analysis
-
-**Scenario:** Analyze all agent-to-agent calls to identify bottlenecks.
-
-```python
-results = await tracer.call_tool("query_cross_session", {
-    "span_type": "agent_call"
-})
-
-# Returns all inter-agent calls — analyze metrics like success rate, frequency
-for span in results:
-    print(f"{span['actor']} → {span['target']}: {span['status']}")
 ```
 
 ---
@@ -650,13 +684,19 @@ for span in results:
 mcp-tracer/
 ├── src/
 │   └── mcp_tracer/
-│       ├── server.py           # FastMCP entry point
+│       ├── server.py           # FastMCP entry point + JWT middleware
 │       ├── tools/              # MCP tool handlers
 │       ├── db/                 # Models + repositories
 │       ├── schemas/            # Pydantic I/O schemas
 │       ├── services/           # Business logic
-│       └── core/               # Config, logging, exceptions
+│       └── core/
+│           ├── config.py       # pydantic-settings
+│           ├── security.py     # JWT token creation + verification
+│           ├── lifespan.py     # startup + shutdown
+│           └── logging.py      # structured logger
 ├── migrations/                 # Alembic migrations
+├── scripts/
+│   └── generate_token.py       # token generation utility
 ├── tests/
 └── docker/
 ```
@@ -673,10 +713,12 @@ mcp-tracer/
 - [x] Full trace tree reconstruction
 - [x] Cross-session querying with filters
 - [x] Soft session replay
+- [x] JWT authentication — agent and session-scoped tokens
 
 ### v2 (Planned)
 
-- [ ] Hard replay — snapshot and re-inject tool outputs for identical reproduction
+- [ ] Automatic context propagation between agents
+- [ ] Hard replay — snapshot and re-inject tool outputs
 - [ ] Visual DAG dashboard
 - [ ] Log sampling and levels for production
 - [ ] Session branching for retries
@@ -687,10 +729,55 @@ mcp-tracer/
 
 ## Contributing
 
-Contributions are welcome. Please open an issue first to discuss what you'd like to change.
+First off, thank you for considering contributing to #AgnetTrace! It's people like you that make the open-source community such an amazing place to learn, inspire, and create.
+
+We welcome contributions of all kinds, whether it is fixing bugs, improving documentation, suggesting new features, or writing code.
 
 ---
 
-## License
+## ⚖️ License and Contributions
 
-MIT
+This project is open-source and released under the **MIT License**. By contributing to this repository, you agree that your contributions will be licensed under its MIT License.
+
+---
+
+## 🚀 How Can I Contribute?
+
+### Reporting Bugs
+
+If you find a bug, please create an issue to report it. To help us resolve it quickly, include:
+
+- A clear and descriptive title.
+- Steps to reproduce the exact behavior.
+- Expected behavior versus what actually happened.
+- Your operating system, browser, and relevant version numbers.
+
+### Suggesting Enhancements
+
+Feature requests are always welcome! When proposing a new feature, please open an issue and include:
+
+- The problem this feature solves.
+- A detailed description of the proposed solution.
+- Any alternative solutions you have considered.
+- Mockups or code snippets if applicable.
+
+---
+
+## 🛠️ Pull Request Process
+
+When you are ready to submit your code, follow this process:
+
+1. Create a new branch for your feature or bugfix: `git checkout -b feature/your-feature-name`
+2. Make your changes and test them thoroughly.
+3. Commit your changes with clear, descriptive commit messages.
+4. Push your branch to your forked repository: `git push origin feature/your-feature-name`
+5. Open a Pull Request (PR) against the `feature/external` branch of the original repository.
+6. Provide a detailed description in your PR explaining what changes you made and why.
+
+A maintainer will review your PR, provide feedback, and merge it once it is approved.
+
+---
+
+## 🤝 Code of Conduct
+
+Please note that this project is released with a Contributor Code of Conduct. By participating in this project, you agree to abide by its terms. We expect all contributors to maintain a respectful and welcoming environment for everyone.
