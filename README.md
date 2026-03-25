@@ -771,7 +771,7 @@ When you are ready to submit your code, follow this process:
 2. Make your changes and test them thoroughly.
 3. Commit your changes with clear, descriptive commit messages.
 4. Push your branch to your forked repository: `git push origin feature/your-feature-name`
-5. Open a Pull Request (PR) against the `feature/external` branch of the original repository.
+5. Open a Pull Request (PR) against the `feature/External-PR` branch of the original repository.
 6. Provide a detailed description in your PR explaining what changes you made and why.
 
 A maintainer will review your PR, provide feedback, and merge it once it is approved.
