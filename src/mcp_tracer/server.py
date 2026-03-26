@@ -33,8 +33,7 @@ class JWTAuthMiddleware(Middleware):
         'default': {"create_session", "query_cross_session"}
     }
 
-    SESSION_FREE_TOOLS = ENV_TOOLS.get(settings.get('APP_ENV'), ENV_TOOLS['default'])
-
+    SESSION_FREE_TOOLS = ENV_TOOLS.get(settings.APP_ENV, ENV_TOOLS['default'])
     async def on_call_tool(self, context, call_next):
         # FastMCP passes request metadata via `context.request_context` in some versions,
         # but not all integrations populate it. Fall back to empty metadata.
